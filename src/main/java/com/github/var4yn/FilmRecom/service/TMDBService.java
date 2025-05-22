@@ -17,17 +17,19 @@ import java.util.Set;
 
 @Service
 public class TMDBService {
-    private static final String TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
+    private final String TMDB_API_BASE_URL;
     private final String apiKey;
     private final RestTemplate restTemplate;
     private final MovieRepository movieRepository;
     private final GenreRepository genreRepository;
 
     public TMDBService(@Value("${tmdb.api.key}") String apiKey,
+                       @Value("${tmdb.api.base-url}") String tmdbApiBaseUrl,
                        RestTemplate restTemplate,
                        MovieRepository movieRepository,
                        GenreRepository genreRepository) {
         this.apiKey = apiKey;
+        this.TMDB_API_BASE_URL = tmdbApiBaseUrl;
         this.restTemplate = restTemplate;
         this.movieRepository = movieRepository;
         this.genreRepository = genreRepository;
