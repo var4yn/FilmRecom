@@ -16,6 +16,6 @@ public class Role {
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(length = 20)
+    @Column(length = 20, columnDefinition = "varchar(20) check (name in ('ROLE_USER', 'ROLE_MODERATOR', 'ROLE_ADMIN'))")
     private ERole name;
 }

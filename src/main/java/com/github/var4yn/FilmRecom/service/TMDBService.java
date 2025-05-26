@@ -1,134 +1,120 @@
 package com.github.var4yn.FilmRecom.service;
 
+import com.github.var4yn.FilmRecom.converter.MovieConverter;
+import com.github.var4yn.FilmRecom.dto.MovieDTO;
+import com.github.var4yn.FilmRecom.dto.MovieSearchResponse;
 import com.github.var4yn.FilmRecom.model.Genre;
 import com.github.var4yn.FilmRecom.model.Movie;
 import com.github.var4yn.FilmRecom.repository.GenreRepository;
 import com.github.var4yn.FilmRecom.repository.MovieRepository;
-import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.time.LocalDate;
-import java.util.HashSet;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.Map;
 
 @Service
 public class TMDBService {
-    private final String TMDB_API_BASE_URL;
-    private final String apiKey;
     private final RestTemplate restTemplate;
     private final MovieRepository movieRepository;
     private final GenreRepository genreRepository;
+    private final String apiKey;
+    private final String baseUrl;
 
-    public TMDBService(@Value("${tmdb.api.key}") String apiKey,
-                       @Value("${tmdb.api.base-url}") String tmdbApiBaseUrl,
-                       RestTemplate restTemplate,
-                       MovieRepository movieRepository,
-                       GenreRepository genreRepository) {
-        this.apiKey = apiKey;
-        this.TMDB_API_BASE_URL = tmdbApiBaseUrl;
+    private static final String IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final Logger logger = LoggerFactory.getLogger(TMDBService.class);
+
+    public TMDBService(
+            RestTemplate restTemplate,
+            MovieRepository movieRepository,
+            GenreRepository genreRepository,
+            @Value("${tmdb.api.key}") String apiKey,
+            @Value("${tmdb.api.base-url}") String baseUrl) {
         this.restTemplate = restTemplate;
         this.movieRepository = movieRepository;
         this.genreRepository = genreRepository;
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl;
     }
 
-    public void fetchPopularMovies() {
-        String url = TMDB_API_BASE_URL + "/movie/popular?api_key=" + apiKey;
-        TMDBResponse response = restTemplate.getForObject(url, TMDBResponse.class);
+    private HttpHeaders createHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("accept", "application/json");
+        headers.set("Authorization", "Bearer " + apiKey);
+        return headers;
+    }
 
-        if (response != null && response.getResults() != null) {
-            for (TMDBMovie tmdbMovie : response.getResults()) {
-                saveMovieFromTMDB(tmdbMovie);
-            }
+    public MovieSearchResponse getPopularMovies(int page) {
+        String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/movie/popular")
+                .queryParam("page", page)
+                .queryParam("language", "ru-RU")
+                .build()
+                .toUriString();
+
+        try {
+            HttpEntity<?> entity = new HttpEntity<>(createHeaders());
+            logger.info("Запрос на получение популярных фильмов {}", entity);
+            logger.info("URL: {}", url);
+            var el = restTemplate.exchange(url, HttpMethod.GET, entity, MovieSearchResponse.class);
+            logger.info("res = {}", el);
+            return el.getBody();
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка при получении популярных фильмов: " + e.getMessage(), e);
+        }
+    }
+
+    public MovieSearchResponse searchMovies(String query, int page) {
+        String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/search/movie")
+                .queryParam("query", query)
+                .queryParam("page", page)
+                .queryParam("language", "ru-RU")
+                .build()
+                .toUriString();
+
+        try {
+            HttpEntity<?> entity = new HttpEntity<>(createHeaders());
+            return restTemplate.exchange(url, HttpMethod.GET, entity, MovieSearchResponse.class).getBody();
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка при поиске фильмов: " + e.getMessage(), e);
+        }
+    }
+
+    public Movie getMovieDetails(Long tmdbId) {
+        String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/movie/" + tmdbId)
+                .queryParam("language", "ru-RU")
+                .build()
+                .toUriString();
+
+        try {
+            HttpEntity<?> entity = new HttpEntity<>(createHeaders());
+            MovieDTO movieDTO = restTemplate.exchange(url, HttpMethod.GET, entity, MovieDTO.class).getBody();
+            logger.info("Получил детали фильма: {}", movieDTO);
+            return MovieConverter.toEntity(movieDTO);
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка при получении деталей фильма: " + e.getMessage(), e);
         }
     }
 
     public Movie searchMovieByTitle(String title) {
-        String url = TMDB_API_BASE_URL + "/search/movie?api_key=" + apiKey + "&query=" + title;
-        TMDBResponse response = restTemplate.getForObject(url, TMDBResponse.class);
-
-        if (response != null && !response.getResults().isEmpty()) {
-            return saveMovieFromTMDB(response.getResults().get(0));
+        MovieSearchResponse response = searchMovies(title, 1);
+        if (response != null && !response.getMovies().isEmpty()) {
+            return MovieConverter.toEntity(response.getMovies().get(0));
         }
         return null;
-    }
-
-    private Movie saveMovieFromTMDB(TMDBMovie tmdbMovie) {
-        Optional<Movie> existingMovie = movieRepository.findByTmdbId(tmdbMovie.getId());
-        if (existingMovie.isPresent()) {
-            return existingMovie.get();
-        }
-
-        Movie movie = new Movie();
-        movie.setTmdbId(tmdbMovie.getId());
-        movie.setTitle(tmdbMovie.getTitle());
-        movie.setOriginalTitle(tmdbMovie.getOriginalTitle());
-        movie.setOverview(tmdbMovie.getOverview());
-        movie.setPosterPath(tmdbMovie.getPosterPath());
-        movie.setBackdropPath(tmdbMovie.getBackdropPath());
-        movie.setReleaseDate(tmdbMovie.getReleaseDate());
-        movie.setPopularity(tmdbMovie.getPopularity());
-        movie.setVoteAverage(tmdbMovie.getVoteAverage());
-        movie.setVoteCount(tmdbMovie.getVoteCount());
-
-        // Получить детали по фильму
-        String detailsUrl = TMDB_API_BASE_URL + "/movie/" + tmdbMovie.getId() + "?api_key=" + apiKey;
-        TMDBMovieDetails details = restTemplate.getForObject(detailsUrl, TMDBMovieDetails.class);
-
-        if (details != null) {
-            movie.setRuntime(details.getRuntime());
-            movie.setStatus(details.getStatus());
-
-            // Заполняем жанры
-            Set<Genre> genres = new HashSet<>();
-            for (TMDBGenre tmdbGenre : details.getGenres()) {
-                Genre genre = genreRepository.findByTmdbId(tmdbGenre.getId())
-                        .orElseGet(() -> {
-                            Genre newGenre = new Genre();
-                            newGenre.setTmdbId(tmdbGenre.getId());
-                            newGenre.setName(tmdbGenre.getName());
-                            return genreRepository.save(newGenre);
-                        });
-                genres.add(genre);
-            }
-            movie.setGenres(genres);
-        }
-
-        return movieRepository.save(movie);
-    }
-
-    @Data
-    private static class TMDBResponse {
-        private List<TMDBMovie> results;
-    }
-
-    @Data
-    private static class TMDBMovie {
-        private Long id;
-        private String title;
-        private String originalTitle;
-        private String overview;
-        private String posterPath;
-        private String backdropPath;
-        private LocalDate releaseDate;
-        private Double popularity;
-        private Double voteAverage;
-        private Integer voteCount;
-    }
-
-    @Data
-    private static class TMDBMovieDetails extends TMDBMovie {
-        private Integer runtime;
-        private String status;
-        private List<TMDBGenre> genres;
-    }
-
-    @Data
-    private static class TMDBGenre {
-        private Long id;
-        private String name;
     }
 }

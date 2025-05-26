@@ -1,0 +1,1 @@
+ALTER TABLE ratings ADD COLUMN review TEXT; 

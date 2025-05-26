@@ -1,30 +1,38 @@
 package com.github.var4yn.FilmRecom.model;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "ratings")
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
+@Entity
+@Table(name = "ratings")
 public class Rating {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id")
+    @ManyToOne
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "movie_id")
+    @ManyToOne
+    @JoinColumn(name = "movie_id", nullable = false)
     private Movie movie;
 
-    private Double score;
+    @Column(nullable = false)
+    private double score;
+
+    @Column(name = "rated_at")
     private LocalDateTime ratedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String review;
+
+    @PrePersist
+    protected void onCreate() {
+        ratedAt = LocalDateTime.now();
+    }
 }

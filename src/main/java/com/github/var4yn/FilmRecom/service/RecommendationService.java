@@ -1,5 +1,8 @@
 package com.github.var4yn.FilmRecom.service;
 
+import com.github.var4yn.FilmRecom.converter.MovieConverter;
+import com.github.var4yn.FilmRecom.dto.GenreDTO;
+import com.github.var4yn.FilmRecom.dto.MovieDTO;
 import com.github.var4yn.FilmRecom.model.Genre;
 import com.github.var4yn.FilmRecom.model.Movie;
 import com.github.var4yn.FilmRecom.model.Rating;
@@ -7,35 +10,35 @@ import com.github.var4yn.FilmRecom.model.User;
 import com.github.var4yn.FilmRecom.repository.MovieRepository;
 import com.github.var4yn.FilmRecom.repository.RatingRepository;
 import com.github.var4yn.FilmRecom.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class RecommendationService {
+    private static final Logger logger = LoggerFactory.getLogger(RecommendationService.class);
     private final MovieRepository movieRepository;
     private final RatingRepository ratingRepository;
     private final UserRepository userRepository;
+    private final MovieService movieService;
+    private final TMDBService tmdbService;
 
-    public RecommendationService(MovieRepository movieRepository,
-                                 RatingRepository ratingRepository,
-                                 UserRepository userRepository) {
-        this.movieRepository = movieRepository;
-        this.ratingRepository = ratingRepository;
-        this.userRepository = userRepository;
-    }
-
-    /**
-     * Рекомендации на основе жанров
-     * */
-    public List<Movie> getContentBasedRecommendations(User user, int limit) {
+    @Transactional(readOnly = true)
+    public List<MovieDTO> getContentBasedRecommendations(User user, int limit) {
         // Получить оценки пользователя
         List<Rating> userRatings = ratingRepository.findByUser(user);
 
         if (userRatings.isEmpty()) {
-            return getPopularMovies(limit);
+            return getPopularMovies(limit).stream()
+                    .map(this::convertToDTO)
+                    .collect(Collectors.toList());
         }
 
         // Найти любимые жанры
@@ -45,7 +48,9 @@ public class RecommendationService {
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 
         if (genreCounts.isEmpty()) {
-            return getPopularMovies(limit);
+            return getPopularMovies(limit).stream()
+                    .map(this::convertToDTO)
+                    .collect(Collectors.toList());
         }
 
         // Получить топ-3 жанра
@@ -85,13 +90,12 @@ public class RecommendationService {
         return recommendations.stream()
                 .distinct()
                 .limit(limit)
+                .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
-    /**
-     * Рекомендации по схожести пользователей
-     * */
-    public List<Movie> getCollaborativeFilteringRecommendations(User user, int limit) {
 
+    @Transactional(readOnly = true)
+    public List<MovieDTO> getCollaborativeFilteringRecommendations(User user, int limit) {
         // Получить список пользователей
         List<User> allUsers = userRepository.findAll();
 
@@ -137,12 +141,11 @@ public class RecommendationService {
                 .sorted(Map.Entry.<Movie, Double>comparingByValue().reversed())
                 .limit(limit)
                 .map(Map.Entry::getKey)
+                .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Вычисление схожести пользователей на основе синусоидальное сходство
-     * */
+    @Transactional(readOnly = true)
     private double calculateUserSimilarity(User user1, User user2) {
         // Получить совпадающие оценки
         List<Rating> user1Ratings = ratingRepository.findByUser(user1);
@@ -185,9 +188,122 @@ public class RecommendationService {
         return num / den;
     }
 
+    @Transactional(readOnly = true)
     private List<Movie> getPopularMovies(int limit) {
-        return movieRepository.findByOrderByPopularityDesc().stream()
+        var els = tmdbService.getPopularMovies(1).getMovies().stream().map(MovieConverter::toEntity).toList();
+        var res = new ArrayList<>(movieRepository
+                .findByOrderByPopularityDesc()
+                .stream()
                 .limit(limit)
+                .toList());
+        res.addAll(els);
+        return res.stream()
+                .limit(limit)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MovieDTO> getRecommendations(Long userId) {
+        // Получаем оценки пользователя
+        List<Rating> userRatings = ratingRepository.findByUserId(userId);
+        
+        // Если у пользователя нет оценок, возвращаем популярные фильмы
+        if (userRatings.isEmpty()) {
+            return getPopularMovies(15).stream()
+                    .map(this::convertToDTO)
+                    .collect(Collectors.toList());
+        }
+
+        // Собираем жанры из фильмов, которые пользователь оценил высоко (4-5)
+        Set<Genre> favoriteGenres = userRatings.stream()
+                .filter(rating -> rating.getScore() >= 4)
+                .flatMap(rating -> rating.getMovie().getGenres().stream())
+                .collect(Collectors.toSet());
+
+        // Получаем все фильмы
+        List<Movie> allMovies = getPopularMovies(15);
+        var users = getCollaborativeFilteringRecommendations(userRepository.getReferenceById(userId), 25);
+
+        // Фильтруем фильмы по любимым жанрам и исключаем уже оцененные
+        Set<Long> ratedMovieIds = userRatings.stream()
+                .map(rating -> rating.getMovie().getId())
+                .collect(Collectors.toSet());
+
+        var res = allMovies.stream()
+                .filter(movie -> !ratedMovieIds.contains(movie.getId()))
+                .filter(movie -> movie.getGenres().stream().anyMatch(favoriteGenres::contains))
+                .sorted(Comparator.comparingDouble(Movie::getVoteAverage).reversed())
+                .limit(10)
+                .map(this::convertToDTO)
                 .collect(Collectors.toList());
+
+        users.addAll(res);
+
+        return users;
+    }
+
+    @Transactional(readOnly = true)
+    public List<MovieDTO> getSimilarMovies(Long movieId) {
+        Movie targetMovie = movieService.getMovieDetails(movieId);
+        Set<Genre> targetGenres = targetMovie.getGenres();
+
+        List<Movie> allMovies = movieService.getPopularMovies(1);
+
+        return allMovies.stream()
+                .filter(movie -> !movie.getId().equals(movieId))
+                .filter(movie -> movie.getGenres().stream().anyMatch(targetGenres::contains))
+                .sorted(Comparator.comparingDouble((Movie movie) -> {
+                    long commonGenres = movie.getGenres().stream()
+                            .filter(targetGenres::contains)
+                            .count();
+                    return commonGenres * movie.getVoteAverage();
+                }).reversed())
+                .limit(10)
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MovieDTO> getUserRecommendations(Long userId) {
+        logger.info("Получение рекомендаций для пользователя: {}", userId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Пользователь не найден"));
+
+        List<MovieDTO> contentBased = getContentBasedRecommendations(user, 5);
+        List<MovieDTO> collaborative = getCollaborativeFilteringRecommendations(user, 25);
+
+        Set<MovieDTO> allRecommendations = new LinkedHashSet<>();
+        allRecommendations.addAll(collaborative);
+        allRecommendations.addAll(contentBased);
+
+        return new ArrayList<>(allRecommendations);
+    }
+
+    private MovieDTO convertToDTO(Movie movie) {
+        MovieDTO dto = new MovieDTO();
+        dto.setId(movie.getId());
+        dto.setTmdbId(movie.getTmdbId());
+        dto.setTitle(movie.getTitle());
+        dto.setOverview(movie.getOverview());
+        dto.setPosterPath(movie.getPosterPath());
+        dto.setPosterUrl(movie.getPosterUrl());
+        dto.setReleaseDate(movie.getReleaseDate());
+        dto.setReleaseYear(movie.getReleaseYear());
+        dto.setVoteAverage(movie.getVoteAverage());
+        dto.setVoteCount(movie.getVoteCount());
+        dto.setPopularity(movie.getPopularity());
+        dto.setOriginalTitle(movie.getOriginalTitle());
+        dto.setOriginalLanguage(movie.getOriginalLanguage());
+        dto.setAdult(movie.getAdult());
+        dto.setBackdropPath(movie.getBackdropPath());
+        dto.setGenres(movie.getGenres().stream()
+                .map(genre -> {
+                    GenreDTO genreDTO = new GenreDTO();
+                    genreDTO.setId(genre.getId());
+                    genreDTO.setName(genre.getName());
+                    return genreDTO;
+                })
+                .collect(Collectors.toSet()));
+        return dto;
     }
 }
