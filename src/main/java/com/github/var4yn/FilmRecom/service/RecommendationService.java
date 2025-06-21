@@ -1,7 +1,6 @@
 package com.github.var4yn.FilmRecom.service;
 
 import com.github.var4yn.FilmRecom.converter.MovieConverter;
-import com.github.var4yn.FilmRecom.dto.GenreDTO;
 import com.github.var4yn.FilmRecom.dto.MovieDTO;
 import com.github.var4yn.FilmRecom.model.Genre;
 import com.github.var4yn.FilmRecom.model.Movie;
@@ -37,8 +36,8 @@ public class RecommendationService {
 
         if (userRatings.isEmpty()) {
             return getPopularMovies(limit).stream()
-                    .map(this::convertToDTO)
-                    .collect(Collectors.toList());
+                    .map(MovieConverter::toDto)
+                    .toList();
         }
 
         // Найти любимые жанры
@@ -49,8 +48,8 @@ public class RecommendationService {
 
         if (genreCounts.isEmpty()) {
             return getPopularMovies(limit).stream()
-                    .map(this::convertToDTO)
-                    .collect(Collectors.toList());
+                    .map(MovieConverter::toDto)
+                    .toList();
         }
 
         // Получить топ-3 жанра
@@ -90,8 +89,8 @@ public class RecommendationService {
         return recommendations.stream()
                 .distinct()
                 .limit(limit)
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+                .map(MovieConverter::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -141,11 +140,10 @@ public class RecommendationService {
                 .sorted(Map.Entry.<Movie, Double>comparingByValue().reversed())
                 .limit(limit)
                 .map(Map.Entry::getKey)
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+                .map(MovieConverter::toDto)
+                .toList();
     }
 
-    @Transactional(readOnly = true)
     private double calculateUserSimilarity(User user1, User user2) {
         // Получить совпадающие оценки
         List<Rating> user1Ratings = ratingRepository.findByUser(user1);
@@ -188,9 +186,12 @@ public class RecommendationService {
         return num / den;
     }
 
-    @Transactional(readOnly = true)
     private List<Movie> getPopularMovies(int limit) {
-        var els = tmdbService.getPopularMovies(1).getMovies().stream().map(MovieConverter::toEntity).toList();
+        var els = tmdbService.getPopularMovies(1).getMovies()
+                .stream()
+                .map(MovieConverter::toEntity)
+                .toList();
+
         var res = new ArrayList<>(movieRepository
                 .findByOrderByPopularityDesc()
                 .stream()
@@ -210,8 +211,8 @@ public class RecommendationService {
         // Если у пользователя нет оценок, возвращаем популярные фильмы
         if (userRatings.isEmpty()) {
             return getPopularMovies(15).stream()
-                    .map(this::convertToDTO)
-                    .collect(Collectors.toList());
+                    .map(MovieConverter::toDto)
+                    .toList();
         }
 
         // Собираем жанры из фильмов, которые пользователь оценил высоко (4-5)
@@ -234,8 +235,8 @@ public class RecommendationService {
                 .filter(movie -> movie.getGenres().stream().anyMatch(favoriteGenres::contains))
                 .sorted(Comparator.comparingDouble(Movie::getVoteAverage).reversed())
                 .limit(10)
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+                .map(MovieConverter::toDto)
+                .toList();
 
         users.addAll(res);
 
@@ -259,8 +260,8 @@ public class RecommendationService {
                     return commonGenres * movie.getVoteAverage();
                 }).reversed())
                 .limit(10)
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+                .map(MovieConverter::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -277,33 +278,5 @@ public class RecommendationService {
         allRecommendations.addAll(contentBased);
 
         return new ArrayList<>(allRecommendations);
-    }
-
-    private MovieDTO convertToDTO(Movie movie) {
-        MovieDTO dto = new MovieDTO();
-        dto.setId(movie.getId());
-        dto.setTmdbId(movie.getTmdbId());
-        dto.setTitle(movie.getTitle());
-        dto.setOverview(movie.getOverview());
-        dto.setPosterPath(movie.getPosterPath());
-        dto.setPosterUrl(movie.getPosterUrl());
-        dto.setReleaseDate(movie.getReleaseDate());
-        dto.setReleaseYear(movie.getReleaseYear());
-        dto.setVoteAverage(movie.getVoteAverage());
-        dto.setVoteCount(movie.getVoteCount());
-        dto.setPopularity(movie.getPopularity());
-        dto.setOriginalTitle(movie.getOriginalTitle());
-        dto.setOriginalLanguage(movie.getOriginalLanguage());
-        dto.setAdult(movie.getAdult());
-        dto.setBackdropPath(movie.getBackdropPath());
-        dto.setGenres(movie.getGenres().stream()
-                .map(genre -> {
-                    GenreDTO genreDTO = new GenreDTO();
-                    genreDTO.setId(genre.getId());
-                    genreDTO.setName(genre.getName());
-                    return genreDTO;
-                })
-                .collect(Collectors.toSet()));
-        return dto;
     }
 }

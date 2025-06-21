@@ -29,21 +29,6 @@ public class MovieService {
         return movieRepository.findByOrderByPopularityDesc();
     }
 
-    private Movie convertToMovie(MovieDTO movieDTO) {
-        Movie movie = new Movie();
-        movie.setTitle(movieDTO.getTitle());
-        movie.setPosterUrl(movieDTO.getPosterUrl());
-        movie.setTmdbId(movieDTO.getTmdbId());
-
-        if (movieDTO.getReleaseDate() != null) {
-            movie.setReleaseYear(movieDTO.getReleaseDate().getYear());
-        }
-
-        movie.setVoteAverage(movieDTO.getVoteAverage());
-        movie.setOverview(movieDTO.getOverview());
-        return movie;
-    }
-
     @Transactional(readOnly = true)
     public Movie getMovieDetails(Long movieId) {
         return movieRepository.findById(movieId)

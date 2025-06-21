@@ -1,6 +1,5 @@
 package com.github.var4yn.FilmRecom.model;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -73,8 +72,4 @@ public class Movie {
 
     @OneToMany(mappedBy = "movie", cascade = CascadeType.ALL)
     private Set<Watchlist> watchlists = new HashSet<>();
-
-    public String getPosterUrl() {
-        return posterPath != null ? "https://image.tmdb.org/t/p/w500" + posterPath : null;
-    }
 }

@@ -1,0 +1,74 @@
+@startuml FilmRecom ER Diagram
+
+!define table(x) class x << (T,#FFAAAA) >>
+!define primary_key(x) <u>x</u>
+!define foreign_key(x) #x#
+
+' Стили
+skinparam class {
+    BackgroundColor White
+    ArrowColor Black
+    BorderColor Black
+}
+
+' Сущности
+table(User) {
+    primary_key(id): Long
+    username: String <<unique>>
+    password: String
+    email: String <<unique>>
+}
+
+table(Role) {
+    primary_key(id): Long
+    name: ERole
+}
+
+table(Movie) {
+    primary_key(id): Long
+    title: String
+    overview: String
+    poster_path: String
+    poster_url: String
+    backdrop_path: String
+    release_date: LocalDate
+    release_year: Integer
+    vote_average: Double
+    vote_count: Integer
+    tmdb_id: Long
+    original_title: String
+    original_language: String
+    adult: Boolean
+    popularity: Double
+}
+
+table(Genre) {
+    primary_key(id): Long
+    name: String
+}
+
+table(Rating) {
+    primary_key(id): Long
+    foreign_key(user_id): Long
+    foreign_key(movie_id): Long
+    rating: Double
+    created_at: LocalDateTime
+}
+
+table(Watchlist) {
+    primary_key(id): Long
+    foreign_key(user_id): Long
+    foreign_key(movie_id): Long
+    status: WatchlistStatus
+    created_at: LocalDateTime
+}
+
+' Связи
+User "1" -- "*" Role : has
+User "1" -- "*" Rating : makes
+User "1" -- "*" Watchlist : has
+Movie "*" -- "*" Genre : has
+Movie "1" -- "*" Rating : receives
+Movie "1" -- "*" Watchlist : included_in
+
+@enduml 
